@@ -8,6 +8,7 @@ import numpy as np
 
 from pyabsa.core.apc.dataset_utils.apc_utils import configure_spacy_model
 from pyabsa.core.atepc.dataset_utils.atepc_utils import prepare_input_for_atepc, split_text
+from pyabsa.utils.pyabsa_utils import validate_example
 
 SENTIMENT_PADDING = -999
 
@@ -105,7 +106,7 @@ class ATEPCProcessor:
                         aspect.append(s)
             else:
                 for j, (t, s, p) in enumerate(zip(tag, sentence, polarity)):
-                    if 999 == p:
+                    if int(999) == int(p):
                         aspect.append(s)
             examples.append(InputExample(guid=str(i), text_a=sentence, text_b=aspect, IOB_label=tag,
                                          aspect_label=[], polarity=polarity))
@@ -116,61 +117,51 @@ def convert_ate_examples_to_features(examples, label_list, max_seq_len, tokenize
     """Loads a data file into a list of `InputBatch`s."""
 
     configure_spacy_model(opt)
-
+    bos_token = tokenizer.bos_token
+    eos_token = tokenizer.eos_token
     label_map = {label: i for i, label in enumerate(label_list, 1)}
     features = []
     for (ex_index, example) in enumerate(examples):
         text_tokens = example.text_a[:]
+        aspect_tokens = example.text_b[:]
         IOB_label = example.IOB_label
+        aspect_label = example.aspect_label
         polarity = example.polarity
         tokens = []
         labels = []
         valid = []
         label_mask = []
+        enum_tokens = [bos_token] + text_tokens + [eos_token] + aspect_tokens + [eos_token]
+        IOB_label = [bos_token] + IOB_label + [eos_token] + aspect_label + [eos_token]
 
-        label_lists = IOB_label
-        for i, word in enumerate(text_tokens):
+        for i, word in enumerate(enum_tokens):
             token = tokenizer.tokenize(word)
             tokens.extend(token)
-            label_1 = label_lists[i]
+            cur_iob = IOB_label[i]
             for m in range(len(token)):
                 if m == 0:
                     label_mask.append(1)
-                    labels.append(label_1)
+                    labels.append(cur_iob)
                     valid.append(1)
                 else:
                     valid.append(0)
-        if len(tokens) >= max_seq_len - 1:
-            tokens = tokens[0:(max_seq_len - 2)]
-            labels = labels[0:(max_seq_len - 2)]
-            valid = valid[0:(max_seq_len - 2)]
-            label_mask = label_mask[0:(max_seq_len - 2)]
-        ntokens = []
-        segment_ids = []
+        tokens = tokens[0:min(len(tokens), max_seq_len - 2)]
+        labels = labels[0:min(len(labels), max_seq_len - 2)]
+        valid = valid[0:min(len(valid), max_seq_len - 2)]
+        segment_ids = [0] * len(example.text_a[:]) + [1] * (max_seq_len - len([0] * len(example.text_a[:])))
+        segment_ids = segment_ids[:max_seq_len]
         label_ids = []
-        ntokens.append("[CLS]")
-        segment_ids.append(0)
-        valid.insert(0, 1)
-        label_mask.insert(0, 1)
-        label_ids.append(label_map["[CLS]"])
-        # label_ids.append(label_map["O"])
+
         for i, token in enumerate(tokens):
-            ntokens.append(token)
-            segment_ids.append(0)
             if len(labels) > i:
                 label_ids.append(0)
-        ntokens.append("[SEP]")
-        segment_ids.append(0)
-        valid.append(1)
-        label_mask.append(1)
-        label_ids.append(label_map["[SEP]"])
-        input_ids_spc = tokenizer.convert_tokens_to_ids(ntokens)
+
+        input_ids_spc = tokenizer.convert_tokens_to_ids(tokens)
         input_mask = [1] * len(input_ids_spc)
         label_mask = [1] * len(label_ids)
         while len(input_ids_spc) < max_seq_len:
             input_ids_spc.append(0)
             input_mask.append(0)
-            segment_ids.append(0)
             label_ids.append(0)
             label_mask.append(0)
             while len(valid) < max_seq_len:
@@ -201,70 +192,72 @@ def convert_ate_examples_to_features(examples, label_list, max_seq_len, tokenize
 def convert_apc_examples_to_features(examples, label_list, max_seq_len, tokenizer, opt=None):
     """Loads a data file into a list of `InputBatch`s."""
 
+    configure_spacy_model(opt)
+
+    bos_token = tokenizer.bos_token
+    eos_token = tokenizer.eos_token
     label_map = {label: i for i, label in enumerate(label_list, 1)}
+    opt.IOB_label_to_index = label_map
     features = []
     for (ex_index, example) in enumerate(examples):
         text_tokens = example.text_a[:]
         aspect_tokens = example.text_b[:]
         IOB_label = example.IOB_label
-        polarity = example.polarity
+        # aspect_label = example.aspect_label
+        aspect_label = ['B-ASP'] * len(aspect_tokens)
+        polarity = [-999] + example.polarity + [-999]
         positions = np.where(np.array(polarity) > 0)[0].tolist()
         tokens = []
         labels = []
         valid = []
         label_mask = []
+        enum_tokens = [bos_token] + text_tokens + [eos_token] + aspect_tokens + [eos_token]
+        IOB_label = [bos_token] + IOB_label + [eos_token] + aspect_label + [eos_token]
+        enum_tokens = enum_tokens[:max_seq_len]
+        IOB_label = IOB_label[:max_seq_len]
 
-        aspect = ' '.join(aspect_tokens)
+        aspect = ' '.join(example.text_b)
+        try:
+            text_left, _, text_right = [s.strip() for s in ' '.join(example.text_a).partition(aspect)]
+        except:
+            text_left = ' '.join(example.text_a)
+            text_right = ''
+            aspect = ''
+        text_raw = text_left + ' ' + aspect + ' ' + text_right
+        validate_example(text_raw, aspect, '')
 
-        text_left, _, text_right = [s.strip() for s in ' '.join(example.text_a).partition(aspect)]
         prepared_inputs = prepare_input_for_atepc(opt, tokenizer, text_left, text_right, aspect)
         lcf_cdm_vec = prepared_inputs['lcf_cdm_vec']
         lcf_cdw_vec = prepared_inputs['lcf_cdw_vec']
 
-        label_lists = IOB_label
-        for i, (word, _) in enumerate(zip(text_tokens, label_lists)):
+        for i, word in enumerate(enum_tokens):
             token = tokenizer.tokenize(word)
             tokens.extend(token)
-            label_1 = label_lists[i]
+            cur_iob = IOB_label[i]
             for m in range(len(token)):
                 if m == 0:
                     label_mask.append(1)
-                    labels.append(label_1)
+                    labels.append(cur_iob)
                     valid.append(1)
                 else:
                     valid.append(0)
-        if len(tokens) >= max_seq_len - 1:
-            tokens = tokens[0:(max_seq_len - 2)]
-            labels = labels[0:(max_seq_len - 2)]
-            valid = valid[0:(max_seq_len - 2)]
-            label_mask = label_mask[0:(max_seq_len - 2)]
-        ntokens = []
-        segment_ids = []
+        tokens = tokens[0:min(len(tokens), max_seq_len - 2)]
+        labels = labels[0:min(len(labels), max_seq_len - 2)]
+        valid = valid[0:min(len(valid), max_seq_len - 2)]
+        segment_ids = [0] * len(example.text_a[:]) + [1] * (max_seq_len - len([0] * len(example.text_a[:])))
+        segment_ids = segment_ids[:max_seq_len]
         label_ids = []
-        ntokens.append("[CLS]")
-        segment_ids.append(0)
-        valid.insert(0, 1)
-        label_mask.insert(0, 1)
-        label_ids.append(label_map["[CLS]"])
-        # label_ids.append(label_map["O"])
+
         for i, token in enumerate(tokens):
-            ntokens.append(token)
-            segment_ids.append(0)
             if len(labels) > i:
-                label_ids.append(0)
-        ntokens.append("[SEP]")
-        segment_ids.append(0)
-        valid.append(1)
-        label_mask.append(1)
-        label_ids.append(label_map["[SEP]"])
-        input_ids_spc = tokenizer.convert_tokens_to_ids(ntokens)
+                label_ids.append(label_map[labels[i]])
+
+        input_ids_spc = tokenizer.convert_tokens_to_ids(tokens)
         input_mask = [1] * len(input_ids_spc)
         label_mask = [1] * len(label_ids)
-
         while len(input_ids_spc) < max_seq_len:
             input_ids_spc.append(0)
             input_mask.append(0)
-            segment_ids.append(0)
             label_ids.append(0)
             label_mask.append(0)
             while len(valid) < max_seq_len:
@@ -284,11 +277,12 @@ def convert_apc_examples_to_features(examples, label_list, max_seq_len, tokenize
                           input_mask=input_mask,
                           segment_ids=segment_ids,
                           label_id=label_ids,
+                          polarity=polarity,
                           valid_ids=valid,
                           label_mask=label_mask,
+                          tokens=example.text_a,
                           lcf_cdm_vec=lcf_cdm_vec,
                           lcf_cdw_vec=lcf_cdw_vec,
-                          tokens=example.text_a,
                           aspect=aspect,
                           positions=positions
                           )

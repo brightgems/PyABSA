@@ -6,7 +6,7 @@
 
 # Copyright (C) 2021. All Rights Reserved.
 
-__version__ = '1.1.23'
+__version__ = '1.10.2'
 __name__ = 'pyabsa'
 
 from termcolor import colored
@@ -42,4 +42,3 @@ check_result = checker.check(__name__, __version__)
 if check_result:
     print(check_result)
     check_update_log()
-    print('You can update via pip: {}'.format(colored('pip install -U {}'.format(__name__), 'green')))

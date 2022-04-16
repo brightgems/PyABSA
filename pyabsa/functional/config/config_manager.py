@@ -6,7 +6,11 @@
 # Copyright (C) 2021. All Rights Reserved.
 from argparse import Namespace
 
+import torch
+
 import pyabsa
+
+one_shot_messages = set()
 
 
 def config_check(args):
@@ -24,7 +28,12 @@ def config_check(args):
         if 'evaluate_begin' in args:
             assert 0 <= args['evaluate_begin'] < args['num_epoch']
         if 'cross_validate_fold' in args:
-            assert args['cross_validate_fold'] == -1 or 5 <= args['cross_validate_fold'] <= 10
+            assert args['cross_validate_fold'] == -1 or args['cross_validate_fold'] > 1
+            if not 5 <= args['cross_validate_fold'] <= 10 and not args['cross_validate_fold'] == -1:
+                message = 'Warning! cross_validate_fold will be better in [5, 10], instead of {}'.format(args['cross_validate_fold'])
+                if message not in one_shot_messages:
+                    print(message)
+                    one_shot_messages.add(message)
         if 'dlcf_a' in args:
             assert args['dlcf_a'] > 1
         if 'dca_p' in args:
@@ -33,6 +42,14 @@ def config_check(args):
             assert args['dca_layer'] >= 1
         if args['model'] == pyabsa.APCModelList.LCA_BERT:
             assert args['lcf'] == 'cdm'  # LCA-Net only support CDM mode
+        if 'ensemble_mode' in args:
+            assert args['ensemble_mode'] in {'cat', 'mean'}
+        if 'optimizer' in args:
+            if 'radam' == args['optimizer'] or 'nadam' == args['optimizer'] or 'sparseadam' == args['optimizer'] and torch.version.__version__ < '1.10.0':
+                message = 'Optimizer {} is not available in PyTorch < 1.10, it will be redirected to Adam instead.'.format(args['optimizer'])
+                if message not in one_shot_messages:
+                    print(message)
+                    one_shot_messages.add('Optimizer {} is not available in PyTorch < 1.10, it will be redirected to Adam instead.'.format(args['optimizer']))
 
     except AssertionError:
         raise RuntimeError('Some parameters are not valid, please see the main example.')

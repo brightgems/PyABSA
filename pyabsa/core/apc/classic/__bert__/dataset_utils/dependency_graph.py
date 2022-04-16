@@ -3,6 +3,7 @@ import pickle
 
 import numpy as np
 import spacy
+import termcolor
 import tqdm
 from spacy.tokens import Doc
 
@@ -18,8 +19,22 @@ class WhitespaceTokenizer(object):
         return Doc(self.vocab, words=words, spaces=spaces)
 
 
-nlp = spacy.load('en_core_web_sm')
-nlp.tokenizer = WhitespaceTokenizer(nlp.vocab)
+def configure_spacy_model(opt):
+    if not hasattr(opt, 'spacy_model'):
+        opt.spacy_model = 'en_core_web_sm'
+    global nlp
+    try:
+        nlp = spacy.load(opt.spacy_model)
+    except:
+        print('Can not load {} from spacy, try to download it in order to parse syntax tree:'.format(opt.spacy_model),
+              termcolor.colored('\npython -m spacy download {}'.format(opt.spacy_model), 'green'))
+        try:
+            os.system('python -m spacy download {}'.format(opt.spacy_model))
+            nlp = spacy.load(opt.spacy_model)
+        except:
+            raise RuntimeError('Download failed, you can download {} manually.'.format(opt.spacy_model))
+
+    nlp.tokenizer = WhitespaceTokenizer(nlp.vocab)
 
 
 def dependency_adj_matrix(text):
@@ -68,13 +83,12 @@ def prepare_dependency_graph(dataset_list, graph_path, max_seq_len):
             fin = open(filename, 'r', encoding='utf-8', newline='\n', errors='ignore')
             lines = fin.readlines()
             fin.close()
-
             for i in tqdm.tqdm(range(0, len(lines), 3), postfix='Construct graph for {}'.format(filename)):
                 text_left, _, text_right = [s.strip() for s in lines[i].partition("$T$")]
                 aspect = lines[i + 1].strip()
                 adj_matrix = dependency_adj_matrix(text_left + ' ' + aspect + ' ' + text_right)
-                idx2graph[i] = adj_matrix
-
+                text = text_left + ' ' + aspect + ' ' + text_right
+                idx2graph[text.lower()] = adj_matrix
         except Exception as e:
             print(e)
             print('unprocessed:', filename)

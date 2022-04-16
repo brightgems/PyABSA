@@ -103,66 +103,16 @@ def load_apc_datasets(fname):
     for f in fname:
         print('loading: {}'.format(f))
         fin = open(f, 'r', encoding='utf-8')
-        lines.extend(fin.readlines())
+        _lines_ = fin.readlines()
+        lines.extend(_lines_)
         fin.close()
     return lines
 
 
-# test code, this implementation applies dynamic truncation on tokenized input,
-# instead of truncating the original input itself
-# def prepare_input_for_apc(opt, tokenizer, text_left, text_right, aspect):
-#     bos_token = tokenizer.bos_token if tokenizer.bos_token else '[CLS]'
-#     eos_token = tokenizer.eos_token if tokenizer.eos_token else '[SEP]'
-#
-#     text_left_tokens = tokenizer.tokenize(text_left)
-#     text_right_tokens = tokenizer.tokenize(text_right)
-#     text_aspect_tokens = tokenizer.tokenize(aspect)
-#
-#     if hasattr(opt, 'dynamic_truncate') and opt.dynamic_truncate:
-#         # reserve 3 tokens for [CLS] and double [SEP]s
-#         _max_seq_len = opt.max_seq_len - 2 * len(text_aspect_tokens) - 3
-#         if _max_seq_len < (len(text_left_tokens) + len(text_right_tokens)):
-#             cut_len = len(text_left_tokens) + len(text_right_tokens) - _max_seq_len
-#             if len(text_left_tokens) > len(text_right_tokens):
-#                 text_left_tokens = text_left_tokens[cut_len:]
-#             else:
-#                 text_right_tokens = text_right_tokens[:len(text_right_tokens) - cut_len]
-#
-#     text_raw = text_left + ' ' + aspect + ' ' + text_right
-#     text_raw_tokens = [bos_token] + text_left_tokens + text_aspect_tokens + text_right_tokens + [eos_token]
-#     text_raw_bert_indices = tokenizer.convert_tokens_to_ids(text_raw_tokens)
-#     text_spc_tokens = text_raw_tokens + text_aspect_tokens + [eos_token]
-#     text_bert_indices = tokenizer.convert_tokens_to_ids(text_spc_tokens)
-#     aspect_bert_indices = tokenizer.convert_tokens_to_ids(text_aspect_tokens)
-#     text_bert_indices = pad_and_truncate(text_bert_indices, opt.max_seq_len)
-#     aspect_begin = len(text_left_tokens) + 1
-#     if 'lcfs' in opt.model_name or opt.use_syntax_based_SRD:
-#         syntactical_dist = get_syntax_distance(text_raw, aspect, tokenizer, opt)
-#     else:
-#         syntactical_dist = None
-#
-#     lca_ids, lcf_cdm_vec = get_lca_ids_and_cdm_vec(opt, text_bert_indices, aspect_bert_indices,
-#                                                    aspect_begin, syntactical_dist)
-#
-#     lcf_cdw_vec = get_cdw_vec(opt, text_bert_indices, aspect_bert_indices,
-#                               aspect_begin, syntactical_dist)
-#
-#     inputs = {
-#         'text_raw': text_raw,
-#         'aspect': aspect,
-#         'text_bert_indices': text_bert_indices,
-#         'text_raw_bert_indices': text_raw_bert_indices,
-#         'aspect_bert_indices': aspect_bert_indices,
-#         'lca_ids': lca_ids,
-#         'lcf_cdm_vec': lcf_cdm_vec,
-#         'lcf_cdw_vec': lcf_cdw_vec,
-#     }
-#
-#     return inputs
-
-def prepare_input_for_apc(opt, tokenizer, text_left, text_right, aspect):
+def prepare_input_for_apc(opt, tokenizer, text_left, text_right, aspect, input_demands):
     if hasattr(opt, 'dynamic_truncate') and opt.dynamic_truncate:
-        _max_seq_len = opt.max_seq_len - len(aspect.split(' '))
+        reserved_num = 3
+        _max_seq_len = opt.max_seq_len - len(aspect.split(' ')) - reserved_num
         text_left = text_left.split(' ')
         text_right = text_right.split(' ')
         if _max_seq_len < (len(text_left) + len(text_right)):
@@ -173,15 +123,6 @@ def prepare_input_for_apc(opt, tokenizer, text_left, text_right, aspect):
                 text_right = text_right[:len(text_right) - cut_len]
         text_left = ' '.join(text_left)
         text_right = ' '.join(text_right)
-
-        # test code
-        text_left = ' '.join(text_left.split(' ')[int(-(opt.max_seq_len - len(aspect.split())) / 2) - 1:])
-        text_right = ' '.join(text_right.split(' ')[:int((opt.max_seq_len - len(aspect.split())) / 2) + 1])
-
-    # if hasattr(opt, 'dynamic_truncate') and opt.dynamic_truncate:
-    #     # dynamic truncation on input text
-    #     text_left = ' '.join(text_left.split(' ')[int(-(opt.max_seq_len - len(aspect.split())) / 2) - 1:])
-    #     text_right = ' '.join(text_right.split(' ')[:int((opt.max_seq_len - len(aspect.split())) / 2) + 1])
 
     tokenizer.bos_token = tokenizer.bos_token if tokenizer.bos_token else '[CLS]'
     tokenizer.eos_token = tokenizer.eos_token if tokenizer.eos_token else '[SEP]'
@@ -197,16 +138,22 @@ def prepare_input_for_apc(opt, tokenizer, text_left, text_right, aspect):
     aspect_begin = len(tokenizer.tokenize(bos_token + ' ' + text_left))
     aspect_position = set(range(aspect_begin, aspect_begin + np.count_nonzero(aspect_bert_indices)))
 
-    if 'lcfs' in opt.model_name or 'ssw_s' in opt.model_name or opt.use_syntax_based_SRD:
+    # if 'lcfs' in opt.model_name or 'ssw_s' in opt.model_name or opt.use_syntax_based_SRD:
+    #     syntactical_dist, _ = get_syntax_distance(text_raw, aspect, tokenizer, opt)
+    # else:
+    #     syntactical_dist = None
+
+    if 'lcfs_vec' in input_demands:
         syntactical_dist, _ = get_syntax_distance(text_raw, aspect, tokenizer, opt)
-    else:
-        syntactical_dist = None
-
-    lcf_cdm_vec = get_lca_ids_and_cdm_vec(opt, text_bert_indices, aspect_bert_indices,
-                                          aspect_begin, syntactical_dist)
-
-    lcf_cdw_vec = get_cdw_vec(opt, text_bert_indices, aspect_bert_indices,
-                              aspect_begin, syntactical_dist)
+        if opt.lcf == 'cdm':
+            lcfs_vec = get_lca_ids_and_cdm_vec(opt, text_bert_indices, aspect_bert_indices, aspect_begin, syntactical_dist)
+        elif opt.lcf == 'cdw':
+            lcfs_vec = get_cdw_vec(opt, text_bert_indices, aspect_bert_indices, aspect_begin, syntactical_dist)
+    if 'lcf_vec' in input_demands:
+        if opt.lcf == 'cdm':
+            lcf_vec = get_lca_ids_and_cdm_vec(opt, text_bert_indices, aspect_bert_indices, aspect_begin, None)
+        elif opt.lcf == 'cdw':
+            lcf_vec = get_cdw_vec(opt, text_bert_indices, aspect_bert_indices, aspect_begin, None)
 
     inputs = {
         'text_raw': text_raw,
@@ -216,8 +163,8 @@ def prepare_input_for_apc(opt, tokenizer, text_left, text_right, aspect):
         'text_bert_indices': text_bert_indices,
         'text_raw_bert_indices': text_raw_bert_indices,
         'aspect_bert_indices': aspect_bert_indices,
-        'lcf_cdm_vec': lcf_cdm_vec,
-        'lcf_cdw_vec': lcf_cdw_vec,
+        'lcf_vec': lcf_vec if 'lcf_vec' in input_demands else 0,
+        'lcfs_vec': lcfs_vec if 'lcfs_vec' in input_demands else 0,
     }
 
     return inputs
@@ -241,10 +188,15 @@ def get_syntax_distance(text_raw, aspect, tokenizer, opt):
         print('Text: {} Aspect: {}'.format(text_raw, aspect))
         raise RuntimeError('Ignore failure in calculate the syntax based SRD: {}, maybe the aspect is None'.format(e))
 
+    if opt.model_name == 'dlcf_dca_bert':
+        dist.insert(0, 0)
+        dist.append(0)
+    else:
+        dist.insert(0, max(dist))
+        dist.append(max(dist))
     raw_tokens.insert(0, tokenizer.bos_token)
-    dist.insert(0, max(dist))
     raw_tokens.append(tokenizer.eos_token)
-    dist.append(max(dist))
+
     # the following two functions are both designed to calculate syntax-based distances
     if opt.srd_alignment:
         syntactical_dist = syntax_distance_alignment(raw_tokens, dist, opt.max_seq_len, tokenizer)
@@ -296,35 +248,37 @@ def get_cdw_vec(opt, bert_spc_indices, aspect_indices, aspect_begin, syntactical
             try:
                 assert 0 <= w <= 1  # exception
             except:
-                print('Warning! invalid CDW weight:', w)
+                pass
+                # print('Warning! invalid CDW weight:', w)
             cdw_vec[i] = w
     return cdw_vec
 
 
 def build_spc_mask_vec(opt, text_ids):
-    spc_mask_vec = np.zeros((opt.max_seq_len, opt.hidden_dim), dtype=np.float32)
-    for i in range(len(text_ids)):
-        spc_mask_vec[i] = np.ones((opt.hidden_dim), dtype=np.float32)
+    spc_mask_vec = np.zeros((opt.max_seq_len), dtype=np.float32)
+    for i, ids in enumerate(text_ids):
+        # if i == 0 or ids:
+        spc_mask_vec[i] = 1
     return spc_mask_vec
 
 
-def build_sentiment_window(examples, tokenizer, similarity_threshold):
-    copy_side_aspect('left', examples[0], examples[0], examples)
+def build_sentiment_window(examples, tokenizer, similarity_threshold, input_demands=None):
+    copy_side_aspect('left', examples[0], examples[0], examples, input_demands)
     for idx in range(1, len(examples)):
         if is_similar(examples[idx - 1]['text_bert_indices'],
                       examples[idx]['text_bert_indices'],
                       tokenizer=tokenizer,
                       similarity_threshold=similarity_threshold):
-            copy_side_aspect('right', examples[idx - 1], examples[idx], examples)
-            copy_side_aspect('left', examples[idx], examples[idx - 1], examples)
+            copy_side_aspect('right', examples[idx - 1], examples[idx], examples, input_demands)
+            copy_side_aspect('left', examples[idx], examples[idx - 1], examples, input_demands)
         else:
-            copy_side_aspect('right', examples[idx - 1], examples[idx - 1], examples)
-            copy_side_aspect('left', examples[idx], examples[idx], examples)
-    copy_side_aspect('right', examples[-1], examples[-1], examples)
+            copy_side_aspect('right', examples[idx - 1], examples[idx - 1], examples, input_demands)
+            copy_side_aspect('left', examples[idx], examples[idx], examples, input_demands)
+    copy_side_aspect('right', examples[-1], examples[-1], examples, input_demands)
     return examples
 
 
-def copy_side_aspect(direct, target, source, examples):
+def copy_side_aspect(direct, target, source, examples, input_demands):
     if 'cluster_ids' not in target:
         target['cluster_ids'] = copy.deepcopy(target['aspect_position'])
         target['side_ex_ids'] = copy.deepcopy(set([target['ex_id']]))
@@ -343,7 +297,11 @@ def copy_side_aspect(direct, target, source, examples):
             examples[ex_id]['cluster_ids'] |= source['cluster_ids']
             examples[ex_id]['side_ex_ids'] |= target['side_ex_ids']
 
-    for data_item in ['lcf_vec']:
+    for data_item in input_demands:
+        if 'right_right_' in data_item or 'left_left_' in data_item:
+            data_item = data_item.replace('right_right_', 'right_', 1).replace('left_left_', 'left_', 1)
+        elif data_item.startswith('right_') or data_item.startswith('left_'):
+            continue
         target[direct + '_' + data_item] = source[data_item]
     target[direct + '_dist'] = int(abs(np.average(list(source['aspect_position'])) - np.average(list(target['aspect_position']))))
     # target[direct + '_dist'] = 0 if id(source['lcf_vec']) == id(target['lcf_vec']) else 1
@@ -353,6 +311,8 @@ def is_similar(s1, s2, tokenizer, similarity_threshold):
     # some reviews in the datasets are broken and can not use s1 == s2 to distinguish
     # the same text which contains multiple aspects, so the similarity check is used
     # similarity check is based on the observation and analysis of datasets
+    if isinstance(s1, int) or isinstance(s2, int):
+        return False
     if abs(np.count_nonzero(s1) - np.count_nonzero(s2)) > 5:
         return False
     count = 0.
@@ -388,6 +348,7 @@ def configure_spacy_model(opt):
             nlp = spacy.load(opt.spacy_model)
         except:
             raise RuntimeError('Download failed, you can download {} manually.'.format(opt.spacy_model))
+    return nlp
 
 
 def calculate_dep_dist(sentence, aspect):
@@ -419,7 +380,6 @@ def calculate_dep_dist(sentence, aspect):
         source = '{}_{}'.format(word.lower_, word.i)
         sum = 0
         flag = 1
-        max_dist = 0
         for term_id, term in zip(term_ids, terms):
             target = '{}_{}'.format(term, term_id)
             try:
@@ -430,7 +390,10 @@ def calculate_dep_dist(sentence, aspect):
         dist[i] = sum / len(terms)
         text[i] = word.text
         if flag == 1:
-            max_dist_temp.append(sum / len(terms))
-        if dist[i] > max_dist:
-            max_dist = dist[i]
+            max_dist_temp.append(dist[i])
+    max_dist = 0
+    for i in range(len(max_dist_temp)):
+        if max_dist_temp[i] > max_dist:
+            max_dist = max_dist_temp[i]
+
     return text, dist, max_dist

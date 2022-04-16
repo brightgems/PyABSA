@@ -6,9 +6,13 @@
 # Copyright (C) 2021. All Rights Reserved.
 import copy
 import os
+import time
 
 import findfile
-from findfile import find_dir
+import torch
+import transformers
+from torch import cuda
+from transformers import AutoConfig
 
 from pyabsa import __version__
 
@@ -25,34 +29,40 @@ from pyabsa.core.tc.training.classifier_trainer import train4classification
 from pyabsa.functional.config.apc_config_manager import APCConfigManager
 from pyabsa.functional.config.atepc_config_manager import ATEPCConfigManager
 from pyabsa.functional.config.classification_config_manager import ClassificationConfigManager
-from pyabsa.functional.dataset import ABSADatasetList
+from pyabsa.utils.file_utils import query_local_version
 
 from pyabsa.utils.logger import get_logger
+from metric_visualizer import MetricVisualizer
 
 from pyabsa.utils.pyabsa_utils import get_device
+
+import warnings
+
+warnings.filterwarnings('once')
 
 
 def init_config(config, auto_device):
     config.device, config.device_name = get_device(auto_device)
+    config.auto_device = auto_device
+    config.device = 'cuda' if auto_device == 'allcuda' else config.device
+    config.model_name = config.model.__name__.lower() if not isinstance(config.model, list) else 'ensemble'
+    config.PyABSAVersion = __version__
+    config.TransformersVersion = transformers.__version__
+    config.TorchVersion = '{}+cuda{}'.format(torch.version.__version__, torch.version.cuda)
 
-    config.model_name = config.model.__name__.lower()
-    config.Version = __version__
-
-    if 'use_syntax_based_SRD' in config:
-        print('-' * 130)
-        print('Force to use syntax distance-based semantic-relative distance,'
-              ' however Chinese is not supported to parse syntax distance yet!  ')
-        print('-' * 130)
     return config
 
 
 class Trainer:
     def __init__(self,
                  config: ConfigManager = None,
-                 dataset: str = None,
-                 from_checkpoint: str = '',
-                 checkpoint_save_mode: int = 1,
-                 auto_device=True):
+                 dataset=None,
+                 from_checkpoint: str = None,
+                 checkpoint_save_mode: int = 0,
+                 auto_device=True,
+                 path_to_save=None,
+                 load_aug=False
+                 ):
         """
 
         :param config: PyABSA.config.ConfigManager
@@ -62,14 +72,25 @@ class Trainer:
                                      "checkpoint_save_mode=1" to save the state_dict,
                                      "checkpoint_save_mode=2" to save the whole model,
                                      "checkpoint_save_mode=3" to save the fine-tuned BERT,
-                                     otherwise avoid to save checkpoint but return the trained model after training
-        :param auto_device: True or False, otherwise 'cuda', 'cpu' works
+                                     otherwise avoid saving checkpoint but return the trained model after training
+        :param auto_device: True or False, otherwise 'allcuda', 'cuda:1', 'cpu' works
+        :param path_to_save=None: Specify path to save checkpoints
+        :param load_aug=False: Load the available augmentation dataset if any
 
         """
+        if not torch.cuda.device_count() > 1 and auto_device == 'allcuda':
+            print('Cuda count <= 1, reset auto_device=True')
+            auto_device = True
+        if 'hidden_dim' not in config.args or 'embed_dim' not in config.args:
+            pretrain_config = AutoConfig.from_pretrained(config.pretrained_bert)
+            config.hidden_dim = pretrain_config.hidden_size
+            config.embed_dim = pretrain_config.hidden_size
+        config.ABSADatasetsVersion = query_local_version()
         if isinstance(config, APCConfigManager):
             self.train_func = train4apc
             self.model_class = SentimentClassifier
             self.task = 'apc'
+
         elif isinstance(config, ATEPCConfigManager):
             self.train_func = train4atepc
             self.model_class = AspectExtractor
@@ -81,15 +102,20 @@ class Trainer:
 
         self.config = config
         if isinstance(dataset, DatasetItem):
-            self.config.dataset_item = list(dataset)
             self.config.dataset_name = dataset.dataset_name
         else:
             custom_dataset = DatasetItem('custom_dataset', dataset)
-            self.config.dataset_item = list(custom_dataset)
             self.config.dataset_name = custom_dataset.dataset_name
-        self.dataset_file = detect_dataset(dataset, task=self.task)
+        self.dataset_file = detect_dataset(self.config.dataset_name, task=self.task, load_aug=load_aug)
         self.config.dataset_file = self.dataset_file
+
         self.config = init_config(self.config, auto_device)
+        if 'MV' not in self.config.args:
+            self.config.MV = MetricVisualizer(name=config.model.__name__ + '-' + self.config.dataset_name,
+                                              trial_tag='Model & Dataset',
+                                              trial_tag_list=[config.model.__name__ + '-' + self.config.dataset_name])
+
+        self.config.ETA_MV = MetricVisualizer('eta-' + self.config.model.__name__ + '-' + self.config.dataset_name, trial_tag='Model & Dataset')
 
         self.from_checkpoint = findfile.find_dir(os.getcwd(), from_checkpoint) if from_checkpoint else ''
         self.checkpoint_save_mode = checkpoint_save_mode
@@ -97,34 +123,61 @@ class Trainer:
         log_name = self.config.model_name
         self.logger = get_logger(os.getcwd(), log_name=log_name, log_type='training')
 
-        if checkpoint_save_mode:
-            config.model_path_to_save = os.path.join(os.getcwd(), 'checkpoints')
+        if checkpoint_save_mode or self.dataset_file['valid']:
+            if path_to_save:
+                config.model_path_to_save = path_to_save
+            elif self.dataset_file['valid'] and not checkpoint_save_mode:
+                print('Using Validation set needs to save checkpoint, turn on checkpoint-saving ...')
+                config.model_path_to_save = 'checkpoints'
+                self.config.save_mode = 1
+            else:
+                config.model_path_to_save = 'checkpoints'
         else:
             config.model_path_to_save = None
+
+        self.inference_model = None
 
         self.train()
 
     def train(self):
+        """
+        just return the trained model for inference (e.g., polarity classification, aspect-term extraction)
+        """
+
         if isinstance(self.config.seed, int):
             self.config.seed = [self.config.seed]
-
         model_path = []
         seeds = self.config.seed
-        for _, s in enumerate(seeds):
-            config = copy.deepcopy(self.config)
-            config.seed = s
+        model = None
+        for i, s in enumerate(seeds):
+            self.config.seed = s
             if self.checkpoint_save_mode:
-                model_path.append(self.train_func(config, self.from_checkpoint, self.logger))
+                model_path.append(self.train_func(self.config, self.from_checkpoint, self.logger))
             else:
                 # always return the last trained model if dont save trained model
-                model = self.model_class(model_arg=self.train_func(config, self.from_checkpoint, self.logger))
+                model = self.model_class(model_arg=self.train_func(self.config, self.from_checkpoint, self.logger))
+        self.config.seed = seeds
+
+        # save_path = '{}_{}'.format(self.config.model_name, self.config.dataset_name)
+        # self.config.MV.summary(save_path)
+
         while self.logger.handlers:
             self.logger.removeHandler(self.logger.handlers[0])
 
         if self.checkpoint_save_mode:
-            return self.model_class(max(model_path))
+            if os.path.exists(max(model_path)):
+                self.inference_model = self.model_class(max(model_path))
         else:
-            return model
+            self.inference_model = model
+
+    def load_trained_model(self):
+        self.inference_model.to(self.config.device)
+        return self.inference_model
+
+    def destroy(self):
+        del self.inference_model
+        cuda.empty_cache()
+        time.sleep(3)
 
 
 class APCTrainer(Trainer):

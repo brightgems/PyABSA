@@ -1,7 +1,9 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from transformers.models.bert.modeling_bert import BertPooler
 
+from pyabsa.network.sa_encoder import Encoder
 from ..layers.dynamic_rnn import DynamicLSTM
 
 
@@ -34,12 +36,10 @@ class Absolute_Position_Embedding(nn.Module):
         return weight
 
 
-class TNet_LF_BERT(nn.Module):
-    inputs = ['text_indices', 'aspect_indices', 'aspect_boundary']
+class TNet_LF_BERT_Unit(nn.Module):
 
     def __init__(self, bert, opt):
-        super(TNet_LF_BERT, self).__init__()
-        print("this is TNet_LF model")
+        super(TNet_LF_BERT_Unit, self).__init__()
         self.embed = bert
         self.position = Absolute_Position_Embedding(opt)
         self.opt = opt
@@ -76,5 +76,47 @@ class TNet_LF_BERT(nn.Module):
 
         z = F.relu(self.convs3(v))  # [(N,Co,L), ...]*len(Ks)
         z = F.max_pool1d(z, z.size(2)).squeeze(2)
-        out = self.fc(z)
-        return out
+
+        return z
+        # out = self.fc(z)
+        # return {'logits': out}
+
+
+class TNet_LF_BERT(nn.Module):
+    inputs = [
+        'text_bert_indices',
+        'aspect_indices',
+        'aspect_boundary',
+        'left_aspect_indices',
+        'left_aspect_boundary',
+        'right_aspect_indices',
+        'right_aspect_boundary',
+    ]
+
+    def __init__(self, bert, opt):
+        super(TNet_LF_BERT, self).__init__()
+
+        self.opt = opt
+        self.asgcn_left = TNet_LF_BERT_Unit(bert, opt) if self.opt.lsa else None
+        self.asgcn_central = TNet_LF_BERT_Unit(bert, opt)
+        self.asgcn_right = TNet_LF_BERT_Unit(bert, opt) if self.opt.lsa else None
+        self.dropout = nn.Dropout(opt.dropout)
+        self.pooler = BertPooler(bert.config)
+        self.linear = nn.Linear(50 * 3, self.opt.polarities_dim)
+        self.dense = nn.Linear(50, self.opt.polarities_dim)
+
+    def forward(self, inputs):
+        res = {'logits': None}
+        if self.opt.lsa:
+            cat_feat = torch.cat(
+                (self.asgcn_left([inputs['text_bert_indices'], inputs['left_aspect_indices'], inputs['left_aspect_boundary']]),
+                 self.asgcn_central([inputs['text_bert_indices'], inputs['aspect_indices'], inputs['aspect_boundary']]),
+                 self.asgcn_right([inputs['text_bert_indices'], inputs['right_aspect_indices'], inputs['right_aspect_boundary']])),
+                -1)
+            cat_feat = self.dropout(cat_feat)
+            res['logits'] = self.linear(cat_feat)
+        else:
+            cat_feat = self.asgcn_central([inputs['text_bert_indices'], inputs['aspect_indices'], inputs['aspect_boundary']])
+            cat_feat = self.dropout(cat_feat)
+            res['logits'] = self.dense(cat_feat)
+        return res

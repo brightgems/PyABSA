@@ -6,7 +6,9 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from transformers.models.bert.modeling_bert import BertPooler
 
+from pyabsa.network.sa_encoder import Encoder
 from ..layers.dynamic_rnn import DynamicLSTM
 
 
@@ -35,18 +37,15 @@ class GraphConvolution(nn.Module):
             return output
 
 
-class ASGCN_BERT(nn.Module):
-    inputs = ['text_indices', 'aspect_indices', 'left_indices', 'dependency_graph']
-
+class ASGCN_BERT_Unit(nn.Module):
     def __init__(self, bert, opt):
-        super(ASGCN_BERT, self).__init__()
+        super(ASGCN_BERT_Unit, self).__init__()
         self.opt = opt
         self.embed = bert
         self.text_lstm = DynamicLSTM(opt.embed_dim, opt.hidden_dim, num_layers=1, batch_first=True, bidirectional=True)
         self.gc1 = GraphConvolution(2 * opt.hidden_dim, 2 * opt.hidden_dim)
         self.gc2 = GraphConvolution(2 * opt.hidden_dim, 2 * opt.hidden_dim)
-        self.fc = nn.Linear(2 * opt.hidden_dim, opt.polarities_dim)
-        self.text_embed_dropout = nn.Dropout(0.3)
+        self.text_embed_dropout = nn.Dropout()
 
     def position_weight(self, x, aspect_double_idx, text_len, aspect_len):
         batch_size = x.shape[0]
@@ -58,14 +57,13 @@ class ASGCN_BERT(nn.Module):
         for i in range(batch_size):
             context_len = text_len[i] - aspect_len[i]
             for j in range(aspect_double_idx[i, 0]):
-                weight[i].append(max(0, 1 - (aspect_double_idx[i, 0] - j) / context_len))
+                weight[i].append(1 - (aspect_double_idx[i, 0] - j) / context_len)
             for j in range(aspect_double_idx[i, 0], aspect_double_idx[i, 1] + 1):
                 weight[i].append(0)
             for j in range(aspect_double_idx[i, 1] + 1, text_len[i]):
-                weight[i].append(max(0, 1 - (j - aspect_double_idx[i, 1]) / context_len))
+                weight[i].append(1 - (j - aspect_double_idx[i, 1]) / context_len)
             for j in range(text_len[i], seq_len):
                 weight[i].append(0)
-            weight[i] = weight[i][:seq_len]
         weight = torch.tensor(weight, dtype=torch.float).unsqueeze(2).to(self.opt.device)
         return weight * x
 
@@ -80,17 +78,17 @@ class ASGCN_BERT(nn.Module):
                 mask[i].append(1)
             for j in range(aspect_double_idx[i, 1] + 1, seq_len):
                 mask[i].append(0)
-            mask[i] = mask[i][:seq_len]
         mask = torch.tensor(mask, dtype=torch.float).unsqueeze(2).to(self.opt.device)
         return mask * x
 
     def forward(self, inputs):
-        text_indices, aspect_indices, left_indices, adj = inputs
-        text_len = torch.sum(text_indices != 0, dim=-1)
+        text_bert_indices, aspect_indices, left_indices, adj = \
+            inputs[0], inputs[1], inputs[2], inputs[3]
+        text_len = torch.sum(text_bert_indices != 0, dim=-1)
         aspect_len = torch.sum(aspect_indices != 0, dim=-1)
         left_len = torch.sum(left_indices != 0, dim=-1)
         aspect_double_idx = torch.cat([left_len.unsqueeze(1), (left_len + aspect_len - 1).unsqueeze(1)], dim=1)
-        text = self.embed(text_indices)['last_hidden_state']
+        text = self.embed(text_bert_indices)['last_hidden_state']
         text = self.text_embed_dropout(text)
         text_out, (_, _) = self.text_lstm(text, text_len)
         seq_len = text_out.shape[1]
@@ -101,5 +99,49 @@ class ASGCN_BERT(nn.Module):
         alpha_mat = torch.matmul(x, text_out.transpose(1, 2))
         alpha = F.softmax(alpha_mat.sum(1, keepdim=True), dim=2)
         x = torch.matmul(alpha, text_out).squeeze(1)  # batch_size x 2*hidden_dim
-        output = self.fc(x)
-        return output
+
+        return x
+
+
+class ASGCN_BERT(nn.Module):
+    inputs = [
+        'text_bert_indices',
+        'aspect_indices',
+        'left_indices',
+        'dependency_graph',
+        'left_aspect_indices',
+        'left_left_indices',
+        'left_dependency_graph',
+        'right_aspect_indices',
+        'right_left_indices',
+        'right_dependency_graph',
+    ]
+
+    def __init__(self, bert, opt):
+        super(ASGCN_BERT, self).__init__()
+        self.opt = opt
+        self.asgcn_left = ASGCN_BERT_Unit(bert, opt) if self.opt.lsa else None
+        self.asgcn_central = ASGCN_BERT_Unit(bert, opt)
+        self.encoder = Encoder(bert.config, opt)
+        self.dropout = nn.Dropout(opt.dropout)
+        self.pooler = BertPooler(bert.config)
+        self.asgcn_right = ASGCN_BERT_Unit(bert, opt) if self.opt.lsa else None
+        self.linear = nn.Linear(self.opt.hidden_dim * 6, self.opt.polarities_dim)
+        self.dense = nn.Linear(self.opt.hidden_dim * 2, self.opt.polarities_dim)
+
+    def forward(self, inputs):
+        res = {'logits': None}
+        if self.opt.lsa:
+            cat_feat = torch.cat(
+                (self.asgcn_left([inputs['text_bert_indices'], inputs['left_aspect_indices'], inputs['left_left_indices'], inputs['left_dependency_graph']]),
+                 self.asgcn_central([inputs['text_bert_indices'], inputs['aspect_indices'], inputs['left_indices'], inputs['dependency_graph']]),
+                 self.asgcn_right([inputs['text_bert_indices'], inputs['right_aspect_indices'], inputs['right_left_indices'], inputs['right_dependency_graph']])),
+                -1)
+            cat_feat = self.dropout(cat_feat)
+            res['logits'] = self.linear(cat_feat)
+        else:
+            cat_feat = self.asgcn_central([inputs['text_bert_indices'], inputs['aspect_indices'], inputs['left_indices'], inputs['dependency_graph']])
+            cat_feat = self.dropout(cat_feat)
+            res['logits'] = self.dense(cat_feat)
+
+        return res

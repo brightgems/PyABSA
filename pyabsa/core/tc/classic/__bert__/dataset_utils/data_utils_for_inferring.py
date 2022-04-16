@@ -57,8 +57,8 @@ class Tokenizer(object):
 
 
 class Tokenizer4Pretraining:
-    def __init__(self, max_seq_len, pretrained_bert_name):
-        self.tokenizer = AutoTokenizer.from_pretrained(pretrained_bert_name)
+    def __init__(self, max_seq_len, opt):
+        self.tokenizer = AutoTokenizer.from_pretrained(opt.pretrained_bert, do_lower_case='uncased' in opt.pretrained_bert)
         self.max_seq_len = max_seq_len
 
     def text_to_sequence(self, text, reverse=False, padding='post', truncating='post'):
@@ -98,26 +98,25 @@ class BERTClassificationDataset(Dataset):
 
     def process_data(self, samples, ignore_error=True):
         all_data = []
-
-        for text in tqdm.tqdm(samples, postfix='building word indices...'):
+        if len(samples) > 1:
+            it = tqdm.tqdm(samples, postfix='building word indices...')
+        else:
+            it = samples
+        for text in it:
             try:
-                # handle for empty lines in inferring_tutorials dataset_utils
+                # handle for empty lines in inference datasets
                 if text is None or '' == text.strip():
                     raise RuntimeError('Invalid Input!')
 
                 if '!ref!' in text:
-                    text, label = text.split('!ref!')[0].strip(), text.split('!ref!')[1].strip()
-                    label = int(label) if label else LABEL_PADDING
-                    text = text.replace('[PADDING]', '')
+                    text, _, label = text.strip().partition('!ref!')
+                    label = label.strip()
+                    text = text.strip().lower()
 
-                    if label < 0:
-                        raise RuntimeError(
-                            'Invalid label detected, only please label the sentiment between {0, N-1} '
-                            '(assume there are N types of labels.)')
                 else:
                     label = LABEL_PADDING
 
-                text_indices = self.tokenizer.text_to_sequence(text)
+                text_indices = self.tokenizer.text_to_sequence('{} {} {}'.format(self.tokenizer.tokenizer.cls_token, text, self.tokenizer.tokenizer.sep_token))
 
                 data = {
                     'text_bert_indices': text_indices

@@ -1,11 +1,315 @@
 {
+  "1.10.2": {
+    "1": "General Update"
+  },
+  "1.10.0": {
+    "1": "Add more IOB tag support, ref: https://github.com/yangheng95/PyABSA/issues/161",
+    "2": "WARNING: Modify some models, and some checkpoints on Google Drive may be unavailable due to this update"
+  },
+  "1.9.6": {
+    "1": "Revert a change causing APC inference fault",
+    "2": "Modify some default hyper-params",
+    "3": "Add warmup support, e.g., config.warmup_step=1000"
+  },
+  "1.9.5": {
+    "1": "Set default optimizers to AdamW"
+  },
+  "1.9.4": {
+    "1": "Add LSA support for BERT-SPC models"
+  },
+  "1.9.3": {
+    "1": "Test Version, No important modification"
+  },
+  "1.9.2": {
+    "1": "General update, ref https://github.com/yangheng95/PyABSA/issues/159"
+  },
+  "1.9.1": {
+    "1": "Fix a bug in auto hidden_dim and embed_dim setting"
+  },
+  "1.9.0": {
+    "1": "Deprecate hidden_dim and embed_dim setting of pretrained models",
+    "2": "Fix ATEPC metric printing",
+    "3": "Add huggingface space support for ATEPC inference"
+  },
+  "1.8.41": {
+    "1": "Fix output order of ATEPC inference",
+    "2": "Fix process multi-aspect sentence in ATEPC"
+  },
+  "1.8.40": {
+    "1": "Fix valid set loading in BertBaseline APC training",
+    "2": "Fix a bug in multi-cuda training of text classification "
+  },
+  "1.8.39(38)": {
+    "1": "Fix the no decay bug in ATEPC training",
+    "2": "Add apex support (no test yet)"
+  },
+  "1.8.37": {
+    "1": "Fix the fine-tuned bert save function in text classification",
+    "2": "Add SST entry in ClassificationDatasetList"
+  },
+  "1.8.36": {
+    "1": "Fix the fine-tuned bert save function",
+    "2": "Add notification for augment dataset usage"
+  },
+  "1.8.34(35)": {
+    "1": "Refactor the cache strategy to avoid cache loading error"
+  },
+  "1.8.33": {
+    "1": "Modify the version requirement"
+  },
+  "1.8.32": {
+    "1": "This patch fixes the sentiment prediction in ATEPC",
+    "2": "Fix a training problem in ATEPC"
+  },
+  "1.8.30": {
+    "1": "This patch fixes the checkpoint downloading problem"
+  },
+  "1.8.29": {
+    "1": "Migrate googledrivedownloader to gdown, add a hint for Google Drive's large file download restriction",
+    "2": "Fix ASGCN, ASGCN-BERT"
+  },
+  "1.8.28": {
+    "1": "This patch fix a problem in GloVe-based text classification"
+  },
+  "1.8.26": {
+    "1": "Code review & minor fixes"
+  },
+  "1.8.25": {
+    "1": "Add raw LSA support option for TNet-LF and ASGCN-BERT",
+    "2": "Fix some problems",
+    "3": "General maintenance without feature update"
+  },
+  "1.8.24": {
+    "1": "Revise some printing"
+  },
+  "1.8.23": {
+    "1": "Fix a problem of dataset loading"
+  },
+  "1.8.22": {
+    "1": "Fix path of 1.8.21"
+  },
+  "1.8.21": {
+    "1": "Activate retry in case of handle network error",
+    "2": "Remake metric summary board"
+  },
+  "1.8.20": {
+    "1": "Update version dependency of MetricVisualizer"
+  },
+  "1.8.19": {
+    "1": "Fix a problem about show_metric option"
+  },
+  "1.8.16(17,18)": {
+    "1": "Add simple MetricVisualizer (https://github.com/yangheng95/MetricVisualizer) integration. if you dont want to use MetricVisualizer, please set config.show_metric=False"
+  },
+  "1.8.15": {
+    "1": "Minor revisions"
+  },
+  "1.8.14": {
+    "1": "Fix text classification inference using pretrained model (GloVe based inference is not affected)",
+    "2": "Improve stability in using GloVe based model (include APC, TC)"
+  },
+  "1.8.13": {
+    "1": "Add confidence in text classification output"
+  },
+  "1.8.12": {
+    "1": "Add GitEE support in integrated dataset downloading"
+  },
+  "1.8.11": {
+    "1": "Fix version comparison in parsing checkpoints"
+  },
+  "1.8.9(10)": {
+    "1": "Minor doc fix"
+  },
+  "1.8.8": {
+    "1": "Minor improvements"
+  },
+  "1.8.4(5)": {
+    "1": "Minor revisions"
+  },
+  "1.8.2": {
+    "1": "Minor fixes and optimization"
+  },
+  "1.8.1": {
+    "1": "Fix an inference bug for ATEPC"
+  },
+  "1.8.0": {
+    "1": "Add more pretrained model (i.e., encoder model) for ATEPC task. e.g., microsoft/deberta-v3-base(large), roberta-base(large)",
+    "2": "Refactor Docs"
+  },
+  "1.6.17": {
+    "1": "Remove some optimizers to support pytorch < 1.10.1"
+  },
+  "1.6.16": {
+    "1": "Make some minor fixes"
+  },
+  "1.6.15": {
+    "1": "Add validation set support for aspect-based sentiment polarity classification",
+    "2": "Add confidence output for aspect-based sentiment polarity classification",
+    "3": "Make some minor fixes"
+  },
+  "1.6.13": {
+    "1": "Some minor modifications"
+  },
+  "1.6.12": {
+    "1": "Fix cross_validate for APC",
+    "2": "Fix cache function in ATEPC"
+  },
+  "1.6.10": {
+    "1": "Fix a potential problem while training based on checkpoint in multi-cuda environ"
+  },
+  "1.6.7(8)": {
+    "1": "Fix a potential problem while do batch inference after training based on cached dataset"
+  },
+  "1.6.4": {
+    "1": "Fix a potential problem in generate APC inference set",
+    "2": "Register a Yelp dataset in PyABSA provided by WeLi9811: https://github.com/WeiLi9811"
+  },
+  "1.6.3": {
+    "1": "Fix a potential problem in the sentiment classifier while loading tokenizer",
+    "2": "Fix a problem in preprocessing in APC inference"
+  },
+  "1.6": {
+    "0": "This is a stable version which eliminates almost all unknown problems before",
+    "1": "Fix a problem in saving fine-tuned pretrained model",
+    "2": "Fix an inference problem in LCA-BERT, SSW-T, SSW-S models",
+    "3": "Fix a problem in updating ABSADatasets version",
+    "4": "Modify the output format for BERTBaseline models and GloVe based models to adapt apc_trainer architecture",
+    "5": "Fix the data preprocessing code for BERTBaseline models and GloVe based models",
+    "6": "Rename the dependency matrix cache folder, that is for remove conflict between dependency matrix folder and integrated datasets",
+    "7": "Add alert while loading fine-tuned models",
+    "8": "Fix the inference for DLCF-DCA and DLCFS-DCA models",
+    "9": "Fix the embedding function in IAN-Bert model",
+    "10": "Fix the hop arg missing problem in Memnet-Bert, Ram-Bert, Memnet-GloVe, Ram-GloVe models",
+    "11": "Fix a printing problem in baseline APC model inference result",
+    "12": "Fix a parallel problem in BERT-BASE-ATEPC model",
+    "13": "Stabilize the text_classifier",
+    "14": "Fix test_loader init problem and dataset cache problem in ClassificationTrainer"
+  },
+  "1.5.4": {
+    "1": "Fix a a bug while using custom dataset"
+  },
+  "1.5.3": {
+    "1": "Minor fixes and modifications"
+  },
+  "1.5": {
+    "1": "Release after full test, no known error yet",
+    "2": "Fix BERT-SPC Modeling",
+    "3": "Remove release-note check for efficient",
+    "4": "Fix dataset cache function",
+    "5": "Remove DistributedDataParallel for stability",
+    "6": "Remove older checkpoints",
+    "7": "Optimize early stop strategy, now patience means patience for epochs",
+    "8": "Fix a problem may fail APC checkpoint loading",
+    "9": "Fix a data loading problem for ATEPC",
+    "10": "Add cache dataset option for all models",
+    "99": "Other modifications"
+  },
+  "1.3.15": {
+    "1": "Improve stability while using other pretrained models for ATEPC",
+    "2": "This is a general update of default config for ATEPC"
+  },
+  "1.3.13": {
+    "1": "Fix a checkpoint loading problem of APC (Some checkpoint at Google Drive may be unavailable now, we will update soon)"
+  },
+  "1.3.12": {
+    "1": "Refactor to support customize IOB label for ATEPC (The integrated function to covert APC dataset to ATEPC dataset remains only support ASP IOB now, please customize your dataset's IOB label using your own script)",
+    "2": "Update default pretrained model for ATEPC",
+    "3": "Minor changes"
+  },
+  "1.3.11": {
+    "1": "Divide LSA into FAST-LSA and LSA models"
+  },
+  "1.3.9": {
+    "1": "Fix low performance of APC using roberta-base"
+  },
+  "1.3.8": {
+    "1": "Fix a fatal problem in ATEPC example preprocessing (influenced versions: V1.X - V1.3.5), which triggers tremendous ASPECT TOO LONG WARNING. This error severely damaged the ATEPC performance. The ATEPC checkpoints on GoogleDrive were also influenced and may be updated in teh future. ",
+    "2": "Add deep_ensemble option, use config.deep_ensemble=True to activate",
+    "3": "Add early stop option, default patience=5",
+    "4": "Refactor utils to print sorted args",
+    "5": "Fix a problem while using checkpoint_save_mode=3 to save finetuned BERT",
+    "6": "Refactor to retry training only while catching ConnectionError",
+    "7": "Fix an ensemble problem in APC",
+    "8": "Add full support distributed training",
+    "9": "Add distributed training option i.e., DataParallel or DistributedDataParallel",
+    "10": "Fix some potential problem in using other pretrained models in ATEPC to infer (caused by hard code [CLS], [SEP]), support roberta now",
+    "11": "This is an public test version, could be removed later. Please roll back if you find any problem. I am sorry for my mistake, but I dont have enough time to maintain this project."
+  },
+  "1.3.5": {
+    "1": "Update default pretrained_bert (bert-base-uncased -> roberta-base)",
+    "2": "Add cache dataset option for APC task, use config.cache_dataset=True to activate"
+  },
+  "1.3.4": {
+    "1": "Replace remaining BertModel.from_pretrained() and BertTokenizer.from_pretrained() with AutoModel.from_pretrained() and AutoTokenizer.from_pretrained()",
+    "2": "Fix some ensemble problems"
+  },
+  "1.3.1": {
+    "1": "Add multi-cuda support for APC model and part of ATEPC models",
+    "2": "Add ensemble support for APC models",
+    "3": "Fix support of legacy APC models in loading & inference using shared checkpoint "
+  },
+  "1.2.13": {
+    "1": "Minor update in dataset searching"
+  },
+  "1.2.12": {
+    "1": "Add set/get functions for configs"
+  },
+  "1.2.10": {
+    "1": "Add an rule on APC dataset lines checking",
+    "2": "Add SpaCy model config in classic APC models",
+    "3": "Not fully tested for all situations"
+  },
+  "1.2.9": {
+    "1": "Add an rule on APC dataset lines checking",
+    "2": "You can use multiple types of label in your dataset, e.g., string, number"
+  },
+  "1.2.8": {
+    "1": "Fix the convert_apc_set_to_atepc_set function",
+    "2": "Fix the error to load a inference model from training, i.e., use trainer.load_trained_model() to load the inference model",
+    "3": "Fix a bug of batch size setting in atepc inference",
+    "4": "Fix a bug of auto label-mapping"
+  },
+  "1.2.7": {
+    "1": "Deprecated"
+  },
+  "1.2.4": {
+    "1": "Refactor checkpoint map processing format",
+    "2": "Refactor APC inference to merge results with same text",
+    "3": "Improve stability"
+  },
+  "1.2.3": {
+    "1": "Enhance ATEPC dataset converting",
+    "2": "Fix some problems in some particular situations",
+    "3": "Improve stability"
+  },
+  "1.2.2": {
+    "1": "Full support of flexible datasets, update ABSADatasets to version 2021.10.02",
+    "2": "Support batch_size setting in ATEPC, APC, TC inference",
+    "3": "Fix the inference of DLCF_DCA model",
+    "4": "This version is for replacing 1.2.0(1)"
+  },
+  "1.2.0": {
+    "1": "Enhance to support more flexible labels, now you can define string-based label instead of integer labels",
+    "2": "Remove set_sentiment_map() support due to above modification",
+    "3": "Fix a problem may cause problem while building graph for combined datasets",
+    "4": "Fix a printing problem in ATEPC",
+    "5": "Fix a bug in inference set loading",
+    "6": "Redefine the Chinese datasets",
+    "7": "This version involves considerable modification and may contain potential bug"
+  },
+  "1.1.24": {
+    "1": "Add the parameters statistics function",
+    "2": "Optimize the DLCF_DCA model"
+  },
   "1.1.23": {
     "1": "Improve atepc aspect_extractor result, ensure final output is same length and order as original input examples",
-    "2": "Fix a problem may merge all aspects of different example into 1 line if duplicate example inputed"
+    "2": "Fix a problem may merge all aspects of different example into 1 line if duplicate example is fed",
+    "3": "Fix a problem may cause error in text classification",
+    "4": "Fix a dataset loading problem"
   },
-  "1.1.21": {
+  "1.1.22": {
     "1": "Improve dataset search to be more flexible",
-    "2": "Refactor label fix trigger, enable auto label transformation in training and testing while the labels are invalid. This feature is developed based on the mooc dataset: https://github.com/jmc-123/ABSADatasets/tree/master/datasets/apc_datasets/Chinese/mooc",
+    "2": "Refactor label-mapping trigger. This feature is developed based on the mooc dataset: https://github.com/jmc-123/ABSADatasets/tree/master/datasets/apc_datasets/Chinese/mooc",
     "3": "Fix the batch inference of text classification",
     "4": "Fix the text classification dataset downloading problem",
     "5": "Fix a problem may cause failure of ATEPC inference",
@@ -16,7 +320,7 @@
   },
   "1.1.19": {
     "1": "Fix training without testset in APC",
-    "2": "Add SpaCy model setting option"
+    "2": "Add SpaCy model setting option, e.g., config.spacy_model = 'zh_core_web_sm'"
   },
   "1.1.18": {
     "1": "Reformat and fix a bug of ATEPC output"

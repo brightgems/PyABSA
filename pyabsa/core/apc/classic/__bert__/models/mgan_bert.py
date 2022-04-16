@@ -61,7 +61,7 @@ class AlignmentMatrix(nn.Module):
 
 
 class MGAN_BERT(nn.Module):
-    inputs = ['text_indices', 'aspect_indices', 'left_indices']
+    inputs = ['text_bert_indices', 'aspect_indices', 'left_indices']
 
     def __init__(self, bert, opt):
         super(MGAN_BERT, self).__init__()
@@ -76,9 +76,9 @@ class MGAN_BERT(nn.Module):
         self.dense = nn.Linear(8 * opt.hidden_dim, opt.polarities_dim)
 
     def forward(self, inputs):
-        text_raw_indices = inputs[0]  # batch_size x seq_len
-        aspect_indices = inputs[1]
-        text_left_indices = inputs[2]
+        text_raw_indices = inputs['text_bert_indices']  # batch_size x seq_len
+        aspect_indices = inputs['aspect_indices']
+        text_left_indices = inputs['left_indices']
         batch_size = text_raw_indices.size(0)
         ctx_len = torch.sum(text_raw_indices != 0, dim=1)
         asp_len = torch.sum(aspect_indices != 0, dim=1)
@@ -113,4 +113,4 @@ class MGAN_BERT(nn.Module):
         feat = torch.cat([c_asp2ctx, f_asp2ctx, f_ctx2asp, c_ctx2asp], dim=1)
         out = self.dense(feat)  # batch_size x polarity_dim
 
-        return out
+        return {'logits': out}

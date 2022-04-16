@@ -5,9 +5,13 @@
 
 import numpy as np
 import tqdm
+from pyabsa.core.apc.classic.__bert__.dataset_utils.classic_bert_apc_utils import build_sentiment_window
+
+from pyabsa.core.apc.classic.__bert__.dataset_utils.dependency_graph import configure_spacy_model
 from torch.utils.data import Dataset
 from transformers import AutoTokenizer
 
+from pyabsa.utils.pyabsa_utils import validate_example
 from .dependency_graph import dependency_adj_matrix
 from pyabsa.core.apc.dataset_utils.apc_utils import load_apc_datasets, LABEL_PADDING
 
@@ -74,20 +78,7 @@ class Tokenizer4Pretraining:
 class BERTBaselineABSADataset(Dataset):
 
     def __init__(self, tokenizer, opt):
-        self.bert_baseline_input_colses = {
-            'lstm_bert': ['text_indices'],
-            'td_lstm_bert': ['left_with_aspect_indices', 'right_with_aspect_indices'],
-            'tc_lstm_bert': ['left_with_aspect_indices', 'right_with_aspect_indices', 'aspect_indices'],
-            'atae_lstm_bert': ['text_indices', 'aspect_indices'],
-            'ian_bert': ['text_indices', 'aspect_indices'],
-            'memnet_bert': ['context_indices', 'aspect_indices'],
-            'ram_bert': ['text_indices', 'aspect_indices', 'left_indices'],
-            'cabasc_bert': ['text_indices', 'aspect_indices', 'left_with_aspect_indices', 'right_with_aspect_indices'],
-            'tnet_lf_bert': ['text_indices', 'aspect_indices', 'aspect_boundary'],
-            'aoa_bert': ['text_indices', 'aspect_indices'],
-            'mgan_bert': ['text_indices', 'aspect_indices', 'left_indices'],
-            'asgcn_bert': ['text_indices', 'aspect_indices', 'left_indices', 'dependency_graph'],
-        }
+        configure_spacy_model(opt)
 
         self.tokenizer = tokenizer
         self.opt = opt
@@ -96,34 +87,33 @@ class BERTBaselineABSADataset(Dataset):
     def parse_sample(self, text):
         _text = text
         samples = []
-        try:
-            if '!sent!' not in text:
-                splits = text.split('[ASP]')
-                for i in range(0, len(splits) - 1, 2):
-                    sample = text.replace('[ASP]', '').replace(splits[i + 1], '[ASP]' + splits[i + 1] + '[ASP]')
-                    samples.append(sample)
+
+        if '!sent!' not in text:
+            text += '!sent!'
+        text, _, ref_sent = text.partition('!sent!')
+        ref_sent = ref_sent.split(',') if ref_sent else None
+        text = '[PADDING] ' + text + ' [PADDING]'
+        splits = text.split('[ASP]')
+
+        if ref_sent and int((len(splits) - 1) / 2) == len(ref_sent):
+            for i in range(0, len(splits) - 1, 2):
+                sample = text.replace('[ASP]' + splits[i + 1] + '[ASP]',
+                                      '[TEMP]' + splits[i + 1] + '[TEMP]', 1).replace('[ASP]', '')
+                sample += ' !sent! ' + str(ref_sent[int(i / 2)])
+                samples.append(sample.replace('[TEMP]', '[ASP]'))
+        elif not ref_sent or int((len(splits) - 1) / 2) != len(ref_sent):
+            if not ref_sent:
+                print(_text, ' -> No the reference sentiment found')
             else:
-                text, ref_sent = text.split('!sent!')
-                ref_sent = ref_sent.split()
-                text = '[PADDING] ' + text + ' [PADDING]'
-                splits = text.split('[ASP]')
+                print(_text, ' -> Unequal length of reference sentiment and aspects, ignore the reference sentiment.')
 
-                if int((len(splits) - 1) / 2) == len(ref_sent):
-                    for i in range(0, len(splits) - 1, 2):
-                        sample = text.replace('[ASP]' + splits[i + 1] + '[ASP]',
-                                              '[TEMP]' + splits[i + 1] + '[TEMP]').replace('[ASP]', '')
-                        sample += ' !sent! ' + str(ref_sent[int(i / 2)])
-                        samples.append(sample.replace('[TEMP]', '[ASP]'))
-                else:
-                    print(_text,
-                          ' -> Unequal length of reference sentiment and aspects, ignore the reference sentiment.')
-                    for i in range(0, len(splits) - 1, 2):
-                        sample = text.replace('[ASP]' + splits[i + 1] + '[ASP]',
-                                              '[TEMP]' + splits[i + 1] + '[TEMP]').replace('[ASP]', '')
-                        samples.append(sample.replace('[TEMP]', '[ASP]'))
+            for i in range(0, len(splits) - 1, 2):
+                sample = text.replace('[ASP]' + splits[i + 1] + '[ASP]',
+                                      '[TEMP]' + splits[i + 1] + '[TEMP]', 1).replace('[ASP]', '')
+                samples.append(sample.replace('[TEMP]', '[ASP]'))
+        else:
+            raise ValueError('Invalid Input:{}'.format(text))
 
-        except:
-            print('Invalid Input:', _text)
         return samples
 
     def prepare_infer_sample(self, text: str):
@@ -141,6 +131,7 @@ class BERTBaselineABSADataset(Dataset):
     def process_data(self, samples, ignore_error=True):
         all_data = []
 
+        ex_id = 0
         for text in tqdm.tqdm(samples, postfix='building word indices...'):
             try:
                 # handle for empty lines in inferring_tutorials dataset_utils
@@ -150,20 +141,17 @@ class BERTBaselineABSADataset(Dataset):
                 # check for given polarity
                 if '!sent!' in text:
                     text, polarity = text.split('!sent!')[0].strip(), text.split('!sent!')[1].strip()
-                    polarity = int(polarity) if polarity else LABEL_PADDING
+                    polarity = polarity if polarity else LABEL_PADDING
                     text = text.replace('[PADDING]', '')
 
-                    if polarity < 0:
-                        raise RuntimeError(
-                            'Invalid sentiment label detected, only please label the sentiment between {0, N-1} '
-                            '(assume there are N types of sentiment polarities.)')
                 else:
-                    polarity = LABEL_PADDING
+                    polarity = str(LABEL_PADDING)
 
                 # simply add padding in case of some aspect is at the beginning or ending of a sentence
                 text_left, aspect, text_right = text.split('[ASP]')
                 text_left = text_left.replace('[PADDING] ', '')
                 text_right = text_right.replace(' [PADDING]', '')
+                text = text_left + ' ' + aspect + ' ' + text_right
                 text_indices = self.tokenizer.text_to_sequence('[CLS] ' + text_left + ' ' + aspect + ' ' + text_right + " [SEP]")
                 context_indices = self.tokenizer.text_to_sequence(text_left + text_right)
                 left_indices = self.tokenizer.text_to_sequence(text_left)
@@ -184,33 +172,35 @@ class BERTBaselineABSADataset(Dataset):
                 dependency_graph = dependency_graph[:, range(0, self.opt.max_seq_len)]
                 dependency_graph = dependency_graph[range(0, self.opt.max_seq_len), :]
 
+                validate_example(text, aspect, polarity)
+
                 data = {
                     'text_indices': text_indices
-                    if 'text_indices' in self.opt.model.inputs else 0,
+                    if 'text_indices' in self.opt.inputs_cols else 0,
 
                     'context_indices': context_indices
-                    if 'context_indices' in self.opt.model.inputs else 0,
+                    if 'context_indices' in self.opt.inputs_cols else 0,
 
                     'left_indices': left_indices
-                    if 'left_indices' in self.opt.model.inputs else 0,
+                    if 'left_indices' in self.opt.inputs_cols else 0,
 
                     'left_with_aspect_indices': left_with_aspect_indices
-                    if 'left_with_aspect_indices' in self.opt.model.inputs else 0,
+                    if 'left_with_aspect_indices' in self.opt.inputs_cols else 0,
 
                     'right_indices': right_indices
-                    if 'right_indices' in self.opt.model.inputs else 0,
+                    if 'right_indices' in self.opt.inputs_cols else 0,
 
                     'right_with_aspect_indices': right_with_aspect_indices
-                    if 'right_with_aspect_indices' in self.opt.model.inputs else 0,
+                    if 'right_with_aspect_indices' in self.opt.inputs_cols else 0,
 
                     'aspect_indices': aspect_indices
-                    if 'aspect_indices' in self.opt.model.inputs else 0,
+                    if 'aspect_indices' in self.opt.inputs_cols else 0,
 
                     'aspect_boundary': aspect_boundary
-                    if 'aspect_boundary' in self.opt.model.inputs else 0,
+                    if 'aspect_boundary' in self.opt.inputs_cols else 0,
 
                     'dependency_graph': dependency_graph
-                    if 'dependency_graph' in self.opt.model.inputs else 0,
+                    if 'dependency_graph' in self.opt.inputs_cols else 0,
 
                     'text_raw': text,
                     'aspect': aspect,
@@ -218,7 +208,22 @@ class BERTBaselineABSADataset(Dataset):
                 }
 
                 all_data.append(data)
+                ex_id += 1
 
+                all_data = build_sentiment_window(all_data, self.tokenizer, self.opt.similarity_threshold, input_demands=self.opt.inputs_cols)
+                for data in all_data:
+
+                    cluster_ids = []
+                    for pad_idx in range(self.opt.max_seq_len):
+                        if pad_idx in data['cluster_ids']:
+                            cluster_ids.append(data['polarity'])
+                        else:
+                            cluster_ids.append(-100)
+                            # cluster_ids.append(3)
+
+                    data['cluster_ids'] = np.asarray(cluster_ids, dtype=np.int64)
+                    data['side_ex_ids'] = np.array(0)
+                    data['aspect_position'] = np.array(0)
             except Exception as e:
                 if ignore_error:
                     print('Ignore error while processing:', text)

@@ -7,7 +7,8 @@ import numpy as np
 import tqdm
 from torch.utils.data import Dataset
 
-from .dependency_graph import dependency_adj_matrix
+from pyabsa.utils.pyabsa_utils import validate_example
+from .dependency_graph import dependency_adj_matrix, configure_spacy_model
 from pyabsa.core.apc.dataset_utils.apc_utils import load_apc_datasets, LABEL_PADDING
 
 
@@ -59,20 +60,7 @@ class Tokenizer(object):
 class GloVeABSADataset(Dataset):
 
     def __init__(self, tokenizer, opt):
-        self.glove_input_colses = {
-            'lstm': ['text_indices'],
-            'td_lstm': ['left_with_aspect_indices', 'right_with_aspect_indices'],
-            'tc_lstm': ['left_with_aspect_indices', 'right_with_aspect_indices', 'aspect_indices'],
-            'atae_lstm': ['text_indices', 'aspect_indices'],
-            'ian': ['text_indices', 'aspect_indices'],
-            'memnet': ['context_indices', 'aspect_indices'],
-            'ram': ['text_indices', 'aspect_indices', 'left_indices'],
-            'cabasc': ['text_indices', 'aspect_indices', 'left_with_aspect_indices', 'right_with_aspect_indices'],
-            'tnet_lf': ['text_indices', 'aspect_indices', 'aspect_boundary'],
-            'aoa': ['text_indices', 'aspect_indices'],
-            'mgan': ['text_indices', 'aspect_indices', 'left_indices'],
-            'asgcn': ['text_indices', 'aspect_indices', 'left_indices', 'dependency_graph'],
-        }
+        configure_spacy_model(opt)
 
         self.tokenizer = tokenizer
         self.opt = opt
@@ -81,34 +69,33 @@ class GloVeABSADataset(Dataset):
     def parse_sample(self, text):
         _text = text
         samples = []
-        try:
-            if '!sent!' not in text:
-                splits = text.split('[ASP]')
-                for i in range(0, len(splits) - 1, 2):
-                    sample = text.replace('[ASP]', '').replace(splits[i + 1], '[ASP]' + splits[i + 1] + '[ASP]')
-                    samples.append(sample)
+
+        if '!sent!' not in text:
+            text += '!sent!'
+        text, _, ref_sent = text.partition('!sent!')
+        ref_sent = ref_sent.split(',') if ref_sent else None
+        text = '[PADDING] ' + text + ' [PADDING]'
+        splits = text.split('[ASP]')
+
+        if ref_sent and int((len(splits) - 1) / 2) == len(ref_sent):
+            for i in range(0, len(splits) - 1, 2):
+                sample = text.replace('[ASP]' + splits[i + 1] + '[ASP]',
+                                      '[TEMP]' + splits[i + 1] + '[TEMP]', 1).replace('[ASP]', '')
+                sample += ' !sent! ' + str(ref_sent[int(i / 2)])
+                samples.append(sample.replace('[TEMP]', '[ASP]'))
+        elif not ref_sent or int((len(splits) - 1) / 2) != len(ref_sent):
+            if not ref_sent:
+                print(_text, ' -> No the reference sentiment found')
             else:
-                text, ref_sent = text.split('!sent!')
-                ref_sent = ref_sent.split()
-                text = '[PADDING] ' + text + ' [PADDING]'
-                splits = text.split('[ASP]')
+                print(_text, ' -> Unequal length of reference sentiment and aspects, ignore the reference sentiment.')
 
-                if int((len(splits) - 1) / 2) == len(ref_sent):
-                    for i in range(0, len(splits) - 1, 2):
-                        sample = text.replace('[ASP]' + splits[i + 1] + '[ASP]',
-                                              '[TEMP]' + splits[i + 1] + '[TEMP]').replace('[ASP]', '')
-                        sample += ' !sent! ' + str(ref_sent[int(i / 2)])
-                        samples.append(sample.replace('[TEMP]', '[ASP]'))
-                else:
-                    print(_text,
-                          ' -> Unequal length of reference sentiment and aspects, ignore the reference sentiment.')
-                    for i in range(0, len(splits) - 1, 2):
-                        sample = text.replace('[ASP]' + splits[i + 1] + '[ASP]',
-                                              '[TEMP]' + splits[i + 1] + '[TEMP]').replace('[ASP]', '')
-                        samples.append(sample.replace('[TEMP]', '[ASP]'))
+            for i in range(0, len(splits) - 1, 2):
+                sample = text.replace('[ASP]' + splits[i + 1] + '[ASP]',
+                                      '[TEMP]' + splits[i + 1] + '[TEMP]', 1).replace('[ASP]', '')
+                samples.append(sample.replace('[TEMP]', '[ASP]'))
+        else:
+            raise ValueError('Invalid Input:{}'.format(text))
 
-        except:
-            print('Invalid Input:', _text)
         return samples
 
     def prepare_infer_sample(self, text: str):
@@ -126,7 +113,12 @@ class GloVeABSADataset(Dataset):
     def process_data(self, samples, ignore_error=True):
         all_data = []
 
-        for text in tqdm.tqdm(samples, postfix='building word indices...'):
+        ex_id = 0
+        if len(samples) > 1:
+            it = tqdm.tqdm(samples, postfix='building word indices...')
+        else:
+            it = samples
+        for text in it:
             try:
                 # handle for empty lines in inferring_tutorials dataset_utils
                 if text is None or '' == text.strip():
@@ -137,18 +129,16 @@ class GloVeABSADataset(Dataset):
                     text, polarity = text.split('!sent!')[0].strip(), text.split('!sent!')[1].strip()
                     text = text.replace('[PADDING]', '')
 
-                    polarity = int(polarity) if polarity else LABEL_PADDING
-                    if polarity < 0:
-                        raise RuntimeError(
-                            'Invalid sentiment label detected, only please label the sentiment between {0, N-1} '
-                            '(assume there are N types of sentiment polarities.)')
+                    polarity = polarity if polarity else LABEL_PADDING
+
                 else:
-                    polarity = LABEL_PADDING
+                    polarity = str(LABEL_PADDING)
 
                 # simply add padding in case of some aspect is at the beginning or ending of a sentence
                 text_left, aspect, text_right = text.split('[ASP]')
                 text_left = text_left.replace('[PADDING] ', '')
                 text_right = text_right.replace(' [PADDING]', '')
+                text = text_left + ' ' + aspect + ' ' + text_right
 
                 text_indices = self.tokenizer.text_to_sequence(text_left + " " + aspect + " " + text_right)
                 context_indices = self.tokenizer.text_to_sequence(text_left + " " + text_right)
@@ -169,33 +159,35 @@ class GloVeABSADataset(Dataset):
                 dependency_graph = dependency_graph[:, range(0, self.opt.max_seq_len)]
                 dependency_graph = dependency_graph[range(0, self.opt.max_seq_len), :]
 
+                validate_example(text, aspect, polarity)
+
                 data = {
                     'text_indices': text_indices
-                    if 'text_indices' in self.opt.model.inputs else 0,
+                    if 'text_indices' in self.opt.inputs_cols else 0,
 
                     'context_indices': context_indices
-                    if 'context_indices' in self.opt.model.inputs else 0,
+                    if 'context_indices' in self.opt.inputs_cols else 0,
 
                     'left_indices': left_indices
-                    if 'left_indices' in self.opt.model.inputs else 0,
+                    if 'left_indices' in self.opt.inputs_cols else 0,
 
                     'left_with_aspect_indices': left_with_aspect_indices
-                    if 'left_with_aspect_indices' in self.opt.model.inputs else 0,
+                    if 'left_with_aspect_indices' in self.opt.inputs_cols else 0,
 
                     'right_indices': right_indices
-                    if 'right_indices' in self.opt.model.inputs else 0,
+                    if 'right_indices' in self.opt.inputs_cols else 0,
 
                     'right_with_aspect_indices': right_with_aspect_indices
-                    if 'right_with_aspect_indices' in self.opt.model.inputs else 0,
+                    if 'right_with_aspect_indices' in self.opt.inputs_cols else 0,
 
                     'aspect_indices': aspect_indices
-                    if 'aspect_indices' in self.opt.model.inputs else 0,
+                    if 'aspect_indices' in self.opt.inputs_cols else 0,
 
                     'aspect_boundary': aspect_boundary
-                    if 'aspect_boundary' in self.opt.model.inputs else 0,
+                    if 'aspect_boundary' in self.opt.inputs_cols else 0,
 
                     'dependency_graph': dependency_graph
-                    if 'dependency_graph' in self.opt.model.inputs else 0,
+                    if 'dependency_graph' in self.opt.inputs_cols else 0,
 
                     'text_raw': text,
                     'aspect': aspect,
@@ -203,6 +195,7 @@ class GloVeABSADataset(Dataset):
                 }
 
                 all_data.append(data)
+                ex_id += 1
 
             except Exception as e:
                 if ignore_error:
